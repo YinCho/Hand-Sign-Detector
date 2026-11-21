@@ -1,0 +1,15 @@
+# Jetson Orin Nano (JetPack 6, Ubuntu 22.04, Python 3.10).
+#
+# DO NOT `pip install -r` this file on the Jetson: we were told not to change
+# its dependencies. It documents what the LIVE pipeline needs at runtime:
+#
+#   numpy        - already on the Jetson
+#   opencv (cv2) - already on the Jetson
+#   mediapipe    - installed with `pip install --no-deps mediapipe`
+#                  (its deps attrs/flatbuffers came from apt)
+#
+# scikit-learn is NOT needed on the Jetson: the trained model is run with
+# numpy only (src/inference/classifier.py).
+#
+# TODO (David): after checking the board, record the exact versions here
+# with `pip3 list | grep -i -E "mediapipe|numpy|opencv|protobuf|flatbuffers"`.

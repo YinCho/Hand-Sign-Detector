@@ -1,0 +1,17 @@
+# Laptop / training environment. Python 3.10 (same as the Jetson).
+#   py -3.10 -m venv .venv
+#   .venv\Scripts\Activate.ps1          (Windows)   |   source .venv/bin/activate   (Linux/Mac)
+#   pip install -r requirements-train.txt
+#
+# Versions are pinned on purpose: numpy 1.x and OpenCV 4.x match the Jetson
+# (newer OpenCV 5.x needs numpy 2). jax/jaxlib/ml-dtypes are pulled in by
+# mediapipe; they are pinned only so pip doesn't report version conflicts.
+mediapipe==0.10.14
+numpy==1.26.4
+opencv-python==4.10.0.84
+opencv-contrib-python==4.10.0.84
+jax==0.4.30
+jaxlib==0.4.30
+ml-dtypes==0.4.1
+scikit-learn==1.7.2
+pandas==2.3.3
