@@ -48,6 +48,7 @@ class HandTracker:
         the image's aspect ratio: HaGRID photos and the car camera have
         different shapes, and pixels make them comparable.
         """
+        # OpenCV supplies BGR channels. MediaPipe expects the same pixels in RGB order.
         res = self._hands.process(cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB))
         if not res.multi_hand_landmarks:
             return None
@@ -67,7 +68,9 @@ def normalize(pts):
     Returns None for a degenerate hand (all points on top of each other).
     """
     pts = np.asarray(pts, dtype=np.float32)
+    # Point 0 is the wrist. Subtract its x and y from every joint.
     pts = pts - pts[0]
+    # axis=1 gives one wrist-to-joint distance per row. Use the longest as the hand size.
     scale = float(np.max(np.linalg.norm(pts, axis=1)))
     if scale < 1e-6:
         return None
@@ -78,6 +81,7 @@ def mirror_features(features):
     """Left hand <-> right hand. Used for training augmentation so the
     model works with either hand."""
     f = np.asarray(features, dtype=np.float32).reshape(NUM_LANDMARKS, 2).copy()
+    # Flip x around the wrist while keeping y and the joint ordering intact.
     f[:, 0] *= -1
     return f.flatten()
 

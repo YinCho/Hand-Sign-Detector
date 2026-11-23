@@ -57,13 +57,13 @@ def test_csv_rows_and_undo(tmp):
     row = hl.make_row("palm", pts, "test")
     assert len(row) == len(hl.HEADER) == 3 + 42 + 42
     p = os.path.join(tmp, "c.csv")
-    for r in [hl.make_row("palm", pts, "t")] * 5 + [hl.make_row("fist", pts, "t")] * 3:
+    for r in [hl.make_row("palm", pts, "t")] * 5 + [hl.make_row("point", pts, "t")] * 3:
         cd.append_rows(p, [r])
     rows = cd.load_rows(p)
-    assert cd.counts(rows)["palm"] == 5 and cd.counts(rows)["fist"] == 3
+    assert cd.counts(rows)["palm"] == 5 and cd.counts(rows)["point"] == 3
     del rows[-3:]
     cd.write_all(p, rows)
-    assert cd.counts(cd.load_rows(p))["fist"] == 0
+    assert cd.counts(cd.load_rows(p))["point"] == 0
     with open(p) as fh:
         assert next(csv.reader(fh)) == hl.HEADER
 
@@ -114,6 +114,7 @@ def test_numpy_runtime_matches_sklearn(tmp):
         path = os.path.join(tmp, name + ".npz")
         clf_mod.export_mlp(clf, path)
         gm = clf_mod.GestureModel(path)
+        # Compare the exported NumPy probabilities against sklearn on the same inputs to catch export errors.
         ours = np.array([gm.predict_proba(x) for x in Xs[:50]])
         assert np.allclose(ours, clf.predict_proba(Xs[:50]), atol=1e-6), name
         assert gm.predict(Xs[0])[0] == clf.predict(Xs[:1])[0], name

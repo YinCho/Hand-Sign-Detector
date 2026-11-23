@@ -13,6 +13,7 @@ def square_crop(img, bbox, pad=0.5):
     H, W = img.shape[:2]
     x, y, w, h = bbox
     cx, cy = (x + w / 2) * W, (y + h / 2) * H
+    # Convert both box dimensions to pixels before choosing the longer side for the padded crop.
     side = max(w * W, h * H) * (1 + pad)
     x0, y0 = int(max(0, cx - side / 2)), int(max(0, cy - side / 2))
     x1, y1 = int(min(W, cx + side / 2)), int(min(H, cy + side / 2))

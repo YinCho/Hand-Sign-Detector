@@ -79,12 +79,15 @@ class GestureModel:
         """Probability for each class, in the order of self.classes."""
         x = np.asarray(features, dtype=np.float64).reshape(1, -1)
         if self._scaler is not None:
+            # Reuse the training means and scales so a live hand has the same feature units.
             x = (x - self._scaler[0]) / self._scaler[1]
+        # Each hidden layer mixes the previous values with its weights, adds biases and applies the activation.
         for W, b in self._layers[:-1]:
             x = self._act(x @ W + b)
         W, b = self._layers[-1]
         z = (x @ W + b)[0]
         if self._out == "softmax":
+            # Subtracting the largest score keeps exp finite without changing probabilities.
             e = np.exp(z - z.max())
             return e / e.sum()
         p = 1 / (1 + np.exp(-z[0]))  # 2 classes: sklearn uses a single logistic output
@@ -93,5 +96,6 @@ class GestureModel:
     def predict(self, features):
         """(label, confidence) of the most likely class."""
         p = self.predict_proba(features)
+        # The saved class list uses the same order as the output probabilities.
         i = int(np.argmax(p))
         return self.classes[i], float(p[i])

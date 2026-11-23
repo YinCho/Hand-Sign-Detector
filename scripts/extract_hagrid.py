@@ -70,6 +70,7 @@ def main():
                 labels, bboxes = ann.get("labels"), ann.get("bboxes")
                 if not labels or not bboxes:
                     continue
+                # Pair each label with its own hand box; one photo can contain more than one labelled hand.
                 wanted = [(l, b) for l, b in zip(labels, bboxes)
                           if (keep is None or l in keep)
                           and (not args.max_per_class or saved[l] < args.max_per_class)]

@@ -1,194 +1,114 @@
-# Hand-Sign-Detector
+# RoboPet hand-sign detector
 
-Hand-sign control for **RoboPet** (face-verified owner following with
-hand-sign control). A camera frame goes in, a stable command for the car
-comes out:
+RoboPet is a CPEN 391 robot that uses face verification to identify its owner and follows them. This repository contains its hand-sign interface. A person can raise an open palm to request a stop or point down to call the car over. The detector reads a camera frame and returns a stable gesture label. RoboPet’s controller decides how to act on that request.
 
-```
-camera frame
-  → MediaPipe Hands: 21 hand landmarks (pixels)     src/inference/hand_landmarks.py
-  → normalize: 42 numbers, position/size removed    src/inference/hand_landmarks.py
-  → MLP classifier: gesture + confidence            src/inference/classifier.py
-  → smoothing + safety rules: command or nothing    src/inference/pipeline.py
-  → car state machine (Nolé)                        src/robot/  (not written yet)
-```
+## From camera frame to command
 
-| Task | Who | Status |
+MediaPipe Hands locates 21 joints in the camera frame. The detector converts their pixel coordinates into 42 features and passes them to a small multilayer perceptron (MLP). The classifier predicts a pose on every usable frame. A filter then checks whether the prediction is confident and consistent enough to send to the controller.
+
+| Pose | Stable output | Intended use |
 |---|---|---|
-| H1. Test the MediaPipe hand landmark tool on a laptop | David | Done: `scripts/hand_demo.py` |
-| H2. Train the MLP classifier on HaGRID V2 | Jerry | Data extractor and working starter script ready |
-| H3. Merge the landmark tool with the trained classifier | Jerry | `src/inference/pipeline.py` ready; just needs the trained model file |
-| H4. Deploy the full hand-sign pipeline on the Jetson | David | Not started (Nov 28–30) |
-
----
-
-## Quick start (laptop)
-
-Python **3.10** (same as the Jetson).
-
-```powershell
-py -3.10 -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -r requirements-train.txt
-```
-
-Run everything from the repo root:
-
-```powershell
-python scripts/hand_demo.py          # see the 21 landmarks on your hand
-python scripts/live_demo.py          # full pipeline (placeholder model until training is done)
-python scripts/collect_data.py       # record your own gesture samples
-python tests/test_pipeline.py        # checks, no camera needed
-```
-
-## For Jerry: training (H2) and handing the model back
-
-1. **Download HaGRID V2** into `data/hagrid/` (`data/` is git-ignored).
-   Check one annotation file matches the layout described at the top of
-   `scripts/extract_hagrid.py`; if not, adjust `find_image()`.
-2. **Turn images into landmark rows.** This has to use our extractor so
-   training features are made exactly like the live ones:
-   ```powershell
-   python scripts/extract_hagrid.py --annotations data/hagrid/annotations/train --images data/hagrid/images --classes palm fist like peace no_gesture --max-per-class 3000
-   ```
-   Output: `features/landmarks/hagrid_landmarks.csv`. The printed table shows
-   how many hands MediaPipe found per class.
-3. **Train.** `scripts/train_mlp_example.py` works end to end; copy it into
-   `scripts/train.py` and change what you like (layers, classes, more data):
-   ```powershell
-   python scripts/train_mlp_example.py features/landmarks/hagrid_landmarks.csv data/laptop/gesture_data.csv
-   ```
-4. **The one hard rule:** train on columns `f0`–`f41` and finish with
-   `export_mlp(...)`. That writes `checkpoints/gesture_model.npz`, which
-   `scripts/live_demo.py` and the Jetson pick up automatically.
-5. **Pick the gestures with Nolé** (they map to car commands). Use HaGRID's
-   exact class names, and update `GESTURES` in `scripts/collect_data.py` to match.
-
----
-
-## What each file does
-
-### `src/inference/` (the pipeline itself; runs on laptop and Jetson)
-
-| File | What it does |
-|---|---|
-| `hand_landmarks.py` | **Shared core.** `HandTracker` (MediaPipe wrapper returning 21 pixel points), `normalize()` (points → 42 features), `mirror_features()` (left↔right hand), the CSV format (`HEADER`, `make_row`), and drawing helpers. Training and live code both import this, so the features are always made the same way. |
-| `hand_crop.py` | `square_crop()`: square, padded crop around a hand box. Used for HaGRID, and available on the car if hands are missed at a distance (proposal 6.2). |
-| `classifier.py` | `export_mlp()` saves a trained scikit-learn MLP as plain arrays; `GestureModel` runs it with **numpy only** and returns `(label, confidence)`. |
-| `pipeline.py` | `GesturePipeline.process(frame)` → landmarks, raw prediction, and the **smoothed command**. Contains `CommandSmoother` (safety rules) and `FingerCountPlaceholder` (fist/palm stand-in used until the trained model exists). |
-
-### `scripts/` (things you run)
-
-| File | What it does |
-|---|---|
-| `hand_demo.py` | H1 demo: webcam with landmarks and FPS. |
-| `live_demo.py` | Full pipeline on the webcam: frame prediction + smoothed command on screen; prints each command change. `--model`, `--camera`, `--threshold`, `--hold` options. |
-| `collect_data.py` | Records labelled samples (number keys start, SPACE stops, U undoes the last burst). Writes the same CSV format as HaGRID extraction. `--out`, `--source` options (e.g. `--source jetson_cam` for on-car data). |
-| `extract_hagrid.py` | HaGRID V2 images + annotations → landmark CSV. Crops each annotated hand, runs MediaPipe, reports per-class detection counts. |
-| `train_mlp_example.py` | Working starter for H2: loads CSVs, mirror augmentation, StandardScaler + MLP, prints a per-class report, exports the model. |
-| `train.py`, `evaluate.py`, `export_onnx.py` | Jerry's, still empty. |
-
-### Other
-
-| Path | What it is |
-|---|---|
-| `tests/test_pipeline.py` | 9 checks on synthetic data: normalization, aspect ratio, CSV format, undo, cropping, HaGRID extractor, numpy-vs-sklearn equality, smoothing, placeholder. |
-| `requirements-train.txt` | Pinned laptop/training environment (installs cleanly, `pip check` passes). |
-| `requirements-jetson.txt` | What the Jetson needs at runtime. **Documentation only: don't pip-install it on the Jetson.** |
-| `checkpoints/` | Trained model goes here (`gesture_model.npz`). Not git-ignored, so the model can be shared through the repo. |
-| `data/`, `features/`, `models/` | Datasets and generated CSVs. Git-ignored (too big for git). |
-| `configs/training.yaml`, `src/robot/*` | Placeholders, still empty (Jerry / Nolé). |
-
-### Dataset CSV format
-
-One row per hand, made by `make_row()`:
-
-| Columns | Meaning |
-|---|---|
-| `label` | Gesture name (HaGRID class names, e.g. `palm`, `no_gesture`) |
-| `timestamp` | When the row was made |
-| `source` | `hagrid`, `laptop_webcam`, `jetson_cam`, ... so sources can be compared or filtered |
-| `f0`–`f41` | **Model input**: normalized x,y of the 21 landmarks |
-| `px0, py0, … px20, py20` | Raw pixel landmarks, kept so we can re-normalize later without re-running MediaPipe |
-
----
+| Open palm facing camera | palm | Stop |
+| Index finger pointing down | point_down | Come here |
+| Thumb pointing sideways | thumb_side | Spin |
+| Index finger pointing outward or sideways | point | Request owner switch |
+| Neutral pose, missing hand or low confidence | None | No gesture command |
 
 ## Design choices
 
-**MediaPipe Hands + small classifier instead of an image model (YOLO etc.).**
-MediaPipe gives a ready-made, pre-trained 21-point hand tracker, so we only
-train a tiny classifier on 42 numbers instead of an image detector needing
-thousands of labelled photos and GPU memory the face and body models also
-need (proposal 5.3).
+- **Classify the hand shape using landmarks.** RoboPet’s face and body tracking also need compute on the Jetson. Reusing a pretrained hand tracker lets us train just the gesture classifier on 42 numbers per hand. The trade-off is that a missed hand produces no command.
+- **Preserve shape across camera formats.** MediaPipe expresses horizontal and vertical positions as fractions of image width and height. We convert them to pixels first so a wide frame does not distort the hand proportions. We then subtract the wrist position and divide by the longest wrist-to-joint distance. This removes position and scale while preserving orientation, which matters for distinguishing a downward point from a sideways one.
+- **Share the feature calculation.** Data collection and live inference call the same normalization function. Each CSV row keeps the label, timestamp, source, 42 model inputs and original pixel coordinates. Keeping the pixels lets us revisit normalization without processing the video again.
+- **Mirror samples during training.** Flipping the horizontal coordinates adds an opposite-hand example while preserving the direction of a downward point. Live detection uses the original camera frame. Only the webcam preview is mirrored for the person giving the gesture.
+- **Export the classifier as NumPy arrays.** The checkpoint stores the feature scaler, weights, biases and labels together. The Jetson can run the classifier with NumPy, avoiding a runtime dependency on the laptop’s scikit-learn version. The pipeline tests compare the exported model’s predictions with scikit-learn’s.
+- **Give the controller a neutral state.** An ordinary hand pose can be confidently recognized as `no_gesture`. The frame filter also clears the command when tracking drops or confidence falls. Requiring a short hold reduces accidental requests at the cost of a few frames of response time.
 
-**MediaPipe's built-in `solutions.hands` API, version 0.10.14.**
-The model ships inside the pip package, so there is no separate `.task` file
-to download and keep in sync (the empty `assets/hand_landmarker.task`
-placeholder was removed). 0.10.14 still has this API and works with Python 3.10.
+## Test the camera on Windows
 
-**Same Python and library versions as the Jetson.** Python 3.10, numpy 1.x,
-OpenCV 4.x on the laptop, so code that works here doesn't hit a missing
-function on the car. (Newest OpenCV 5.x needs numpy 2, which the Jetson doesn't have.)
+Open PowerShell in the repository root. With Python 3.10 installed, run the following once:
 
-**Pixel coordinates, not MediaPipe's 0–1 values.** MediaPipe's 0–1 values are
-fractions of image width and height, so the same hand looks stretched
-differently in a 1920×1080 HaGRID photo than in a 640×480 car frame. Pixels
-keep the real shape, so training and live features match. (Tested in
-`test_pixels_avoid_aspect_distortion`.)
+~~~powershell
+py -3.10 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-train.txt
+~~~
 
-**Normalization: wrist at the origin, farthest point at distance 1.**
-Removes where the hand is in the frame and how close it is, leaving only the
-shape (proposal: "robust to camera distance"). Only x,y are used; MediaPipe's
-z is a rough relative depth and noisier, so it would add noise for little gain.
+With the webcam connected (or the phone already available as a Windows webcam), run:
 
-**Mirror augmentation during training.** Every training sample is also added
-flipped left↔right, so the model works with either hand without needing
-twice the data.
+~~~powershell
+.\.venv\Scripts\python.exe scripts/live_demo.py --camera 0
+~~~
 
-**Detect on the real frame; mirror only the display.** A selfie-style mirrored
-image turns a right hand into a left hand. The car camera isn't mirrored, so
-recorded data mustn't be either. The screen still shows a mirror view so
-it's easy to use.
+Look for **Using trained model** in the terminal. If it says **placeholder**, check that checkpoints/gesture_model.npz exists and that you started the demo in the project root. If you get the wrong camera or no feed, close other camera demos and try --camera 1. Hold your palm facing the camera until COMMAND shows palm, then lower your hand and check that the command clears. Press Q in the preview to quit.
 
-**HaGRID: square, padded crops around each annotated hand.** MediaPipe finds
-small hands in big photos poorly; cropping fixes that, and the square shape
-avoids distortion. `static_image_mode=True` is used because HaGRID photos are
-unrelated stills, not video.
+## Controller handoff
 
-**One shared module for training and live code.** `hand_landmarks.py` is
-the only place features are made. `FEATURE_VERSION` is saved inside each
-model; if normalization ever changes, old models refuse to load instead of
-silently giving wrong answers.
+Create one GesturePipeline per camera stream and reuse it so the tracker and smoothing state persist.
 
-**Model saved as numpy arrays instead of pickle or ONNX.** A pickled
-scikit-learn model only loads in nearly the same scikit-learn version, and the
-Jetson's apt version (0.23) is much older than the laptop's (1.7). ONNX would
-need onnxruntime on the Jetson (a new dependency) or OpenCV DNN, which
-may not support some extra operations scikit-learn's ONNX converter adds. An MLP is a few
-matrix multiplications, so `classifier.py` does them in numpy; the tests
-check the output matches scikit-learn to 6 decimal places. `export_onnx.py`
-is still there if Jerry prefers ONNX.
+~~~python
+from src.inference.pipeline import GesturePipeline
 
-**Safety smoothing (`CommandSmoother`).** From the proposal: act only on
-confident predictions (≥ 0.8) that hold for several frames (5 in a row), and
-give no command when the hand is lost. `no_gesture` is never a command. Both
-numbers are flags in `live_demo.py` so they can be tuned on the car.
+pipeline = GesturePipeline(model_path="checkpoints/gesture_model.npz")
+# In the camera callback, supply the OpenCV BGR frame.
+result = pipeline.process(frame_bgr)
+command = result.command
+~~~
 
-**`no_gesture` class.** Without it the model must always pick a gesture,
-even for a hand that's just scratching a nose. HaGRID already has this class.
+A command requires five consecutive matching predictions with confidence at least 0.8. A held gesture continues returning its label. The receiving controller handles repeat suppression for actions such as spin and owner switch. The robot controller and live Jetson camera still need integration testing.
 
-**Placeholder model.** `FingerCountPlaceholder` (fist vs. palm by counting
-extended fingers) lets the full pipeline and car integration be tested
-before training is finished; it's replaced automatically once
-`checkpoints/gesture_model.npz` exists.
+## Check the saved model without a camera
 
-## Known gaps / next steps
+~~~powershell
+.\.venv\Scripts\python.exe tests/test_pipeline.py
+.\.venv\Scripts\python.exe scripts/evaluate.py data/laptop/jerry_session6.csv
+~~~
 
-- Not yet tested on real HaGRID images or on the Jetson (only synthetic data
-  and a laptop webcam).
-- `extract_hagrid.py` assumes HaGRID's annotation layout; confirm on a real download.
-- Final gesture list and gesture → car command mapping: decide with Nolé (`src/robot/commands.py`).
-- Proposal 6.2 contingencies (lower resolution, MediaPipe every 2nd–3rd
-  frame, crop around the owner's hand) are not implemented yet; do them in
-  H4 if the Jetson frame rate is too low.
-- Record the exact Jetson package versions in `requirements-jetson.txt`.
+The earlier checkpoint scored **1,226 / 1,334 frames (91.9%)** on session 5 before that session was added to training. The final checkpoint includes sessions 1 through 5. To measure its accuracy on new data, record a fresh session and pass that CSV to the evaluation script. The matrix shows actual gestures in rows and predictions in columns.
+
+## Record or retrain
+
+The CSVs contain labelled landmarks. The data folder is git-ignored; request the session CSVs from Jerry to reproduce training or evaluation. To record, run scripts/collect_data.py with --out and a new CSV path. Keys 1 through 5 select no_gesture, palm, point_down, thumb_side and point, respectively. Space stops the burst, U undoes the last burst and Q quits. Reusing a filename appends rows.
+
+To retrain from the earlier sessions, run the following from the project root. This replaces the checkpoint. The evaluation example above assumes you saved a fresh recording as jerry_session6.csv.
+
+~~~powershell
+.\.venv\Scripts\python.exe scripts/train.py data/laptop/jerry_session1.csv data/laptop/jerry_session2.csv data/laptop/jerry_session3.csv data/laptop/jerry_session4.csv data/laptop/no_gesture_extra.csv data/laptop/jerry_session5.csv
+~~~
+
+## What each file does
+
+### Live gesture detection
+
+| File | Role |
+|---|---|
+| `src/inference/hand_landmarks.py` | Tracks 21 hand landmarks and converts them into the same 42 features used during recording and live prediction. Also defines the CSV columns and draws the landmarks for the preview. |
+| `src/inference/classifier.py` | Exports the trained MLP and scaler, then loads those arrays to predict a gesture and confidence using NumPy. |
+| `src/inference/pipeline.py` | Processes one camera frame at a time. Returns the raw prediction for debugging and the filtered command for the controller. Includes a finger-count fallback for testing without a checkpoint. |
+| `src/inference/hand_crop.py` | Makes a square, padded crop around an annotated hand for HaGRID extraction. |
+| `src/__init__.py`, `src/inference/__init__.py` | Mark the source and inference directories as Python packages. |
+
+### Scripts
+
+| File | When to use it |
+|---|---|
+| `scripts/hand_demo.py` | Check whether MediaPipe can see the hand. The preview shows landmarks and frame rate. |
+| `scripts/live_demo.py` | Try the full detector on a webcam and compare the current prediction with the command that passes the hold filter. |
+| `scripts/collect_data.py` | Record labelled bursts of webcam landmarks to a CSV. Undo the last burst if a pose was labelled incorrectly. |
+| `scripts/extract_hagrid.py` | Prepare optional HaGRID training data by cropping annotated hands and writing detected landmarks in the webcam recorder’s CSV format. |
+| `scripts/train.py` | Train on one or more session CSVs, augment the samples by mirroring, fit the scaler and MLP, and export the checkpoint. |
+| `scripts/evaluate.py` | Score a checkpoint on a labelled session. Prints frame accuracy and a confusion matrix showing which gestures were mixed up. |
+
+### Model, tests and environment
+
+| File | Role |
+|---|---|
+| `checkpoints/gesture_model.npz` | Saved model used by the live demo. Bundles the weights, scaler and gesture labels. |
+| `tests/test_pipeline.py` | Runs camera-free checks for feature geometry, CSV recording and undo, cropping, HaGRID extraction, model export and command filtering. |
+| `requirements-train.txt` | Pins the laptop dependencies for data collection, training and the webcam demo. |
+| `requirements-jetson.txt` | Documents the Jetson runtime environment. Use it as a reference when checking the board’s installed packages. |
+| `.gitignore` | Keeps local files such as recorded session data out of version control. |
+
+## Known gaps and next steps
+
+- **Evaluate the final checkpoint on unseen recordings.** Session 5 became part of training after the earlier evaluation. Record a fresh session and run `scripts/evaluate.py` on it. Include another person and vary distance and lighting to see where recognition breaks down.
+- **Measure response time on the Jetson.** Run the live pipeline with the car camera and record the package versions, frame rate and time from forming a gesture to receiving a stable command. The five-frame hold takes longer as frame rate drops.
+- **Test the handoff to RoboPet’s controller.** Hold a spin gesture and confirm the controller starts a single spin. Lower the hand, verify that the command clears, then repeat the gesture to check that a second request is accepted.

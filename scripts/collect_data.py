@@ -23,10 +23,8 @@ import cv2  # noqa: E402
 from src.inference.hand_landmarks import (  # noqa: E402
     HEADER, HandTracker, draw, make_row, mirror_for_display)
 
-# Use HaGRID's class names EXACTLY so this data mixes with the HaGRID data.
-# "no_gesture" = random hand poses that aren't commands, so the model learns
-# to say "not a command". Placeholders: replace with the team's gestures.
-GESTURES = ["no_gesture", "palm", "fist", "like", "peace"]
+# Number keys follow this order. The selected label is written into each saved row.
+GESTURES = ["no_gesture", "palm", "point_down", "thumb_side", "point"]
 SAVE_EVERY_N_FRAMES = 2   # skip frames so samples aren't near-duplicates
 CAMERA_INDEX = 0
 
@@ -106,6 +104,7 @@ def main():
         if pts is not None:
             draw(view, pts)
 
+        # Save every second tracked frame while a label is active. A missing hand has no coordinates to store.
         if recording and pts is not None and frame_i % SAVE_EVERY_N_FRAMES == 0:
             row = make_row(recording, pts, args.source)
             if row:
@@ -141,6 +140,7 @@ def main():
         elif key in (ord("u"), ord("U")) and burst:
             recording = None
             n = len(burst)
+            # The latest burst is the tail of the CSV. Trim exactly those rows before rewriting it.
             del all_rows[-n:]
             write_all(args.out, all_rows)
             print(f"Undid last burst: removed {n} samples")

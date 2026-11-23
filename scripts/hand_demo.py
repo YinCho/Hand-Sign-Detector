@@ -40,6 +40,7 @@ def main():
             status = "hand: no"
 
         now = time.time()
+        # Weight the newest frame rate by 10% so a single slow frame does not dominate the display.
         fps = 0.9 * fps + 0.1 / max(now - last, 1e-6)
         last = now
         cv2.putText(view, f"{status}   fps: {fps:.0f}   [Q] quit", (10, 25),

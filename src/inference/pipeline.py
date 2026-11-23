@@ -50,13 +50,16 @@ class CommandSmoother:
 
     def update(self, label, confidence):
         """label=None means no hand. Returns the command, or None for 'no command'."""
+        # Break the streak when tracking is lost, the hand is neutral or confidence is too low.
         if label is None or confidence < self.threshold or label == "no_gesture":
             self.candidate, self.count = None, 0
             return None
+        # Only consecutive predictions of the same pose count toward the five-frame default.
         if label == self.candidate:
             self.count += 1
         else:
             self.candidate, self.count = label, 1
+        # A held gesture keeps returning its label until confidence or pose changes.
         return label if self.count >= self.hold_frames else None
 
 
@@ -90,4 +93,5 @@ class GesturePipeline:
             label, conf = None, 0.0
         else:
             label, conf = self.model.predict(features)
+        # Expose the raw guess for debugging and the filtered command for the controller.
         return GestureResult(pts, label, conf, self.smoother.update(label, conf))

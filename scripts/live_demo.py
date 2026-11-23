@@ -27,6 +27,7 @@ def main():
     ap.add_argument("--hold", type=int, default=HOLD_FRAMES)
     args = ap.parse_args()
 
+    # Keep one pipeline across frames so the tracker and gesture streak keep their state.
     pipeline = GesturePipeline(args.model, args.threshold, args.hold)
     print(f"Using {pipeline.model_name}: classes {pipeline.model.classes}")
     cap = cv2.VideoCapture(args.camera)
@@ -40,6 +41,7 @@ def main():
         if not ok:
             break
         r = pipeline.process(frame)
+        # A held pose can return the same command on many frames. Print only changes, including release.
         if r.command != last_command:
             print(f"command: {r.command or '-- none --'}")
             last_command = r.command
