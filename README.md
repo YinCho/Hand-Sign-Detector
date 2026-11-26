@@ -55,6 +55,36 @@ command = result.command
 
 A command requires five consecutive matching predictions with confidence at least 0.8. A held gesture continues returning its label. The receiving controller handles repeat suppression for actions such as spin and owner switch. The robot controller and live Jetson camera still need integration testing.
 
+## Run on the car (ROS 2)
+
+On the car, the hand-sign detector is one more ROS 2 node beside the Project_B7 nodes. It reads the RealSense colour image that `face_node` also uses, so it never opens the camera itself, and it sends actions to Nolé's `fsm_node` (Project_B7, branch `nolef`).
+
+~~~text
+camera driver --/camera/camera/color/image_raw--> gesture_node --/hand_gesture--> fsm_node
+~~~
+
+`fsm_node` expects action words, not pose names, and treats every message as a new request. `src/inference/fsm_bridge.py` translates the pose and sends each gesture once. Lowering the hand and raising it again sends it again.
+
+| Pose (model label) | Message on `/hand_gesture` | What `fsm_node` does |
+|---|---|---|
+| `palm` | `stop` | Stops, even in the middle of a spin |
+| `point_down` | `come` | Follows the owner (searches if the owner is not visible) |
+| `thumb_side` | `spin` | One lap of a circle, only from STOP or FOLLOW |
+| `point` | `switch_owner` | Stops (switching owner is still a TODO in `fsm_node`) |
+| `no_gesture`, or no stable command | nothing | Keeps doing what it was doing |
+
+On the Jetson, MediaPipe must be installed with `pip3 install --user --no-deps "mediapipe==0.10.14"` under the same account that runs ROS. A virtual environment is not visible to ROS nodes. Start the camera and the Project_B7 nodes as usual, then in a new terminal:
+
+~~~bash
+source /opt/ros/humble/setup.bash
+cd ~/Hand-Sign-Detector
+python3 scripts/gesture_node.py
+~~~
+
+The log should say **trained model** and list the four pose-to-action pairs. If it says **placeholder**, `checkpoints/gesture_model.npz` is missing. To watch what reaches the state machine without driving, run `ros2 topic echo /hand_gesture` in another terminal. If the Jetson is too slow with every node running, process fewer frames with `python3 scripts/gesture_node.py --ros-args -p every_n:=3`. The other parameters (`image_topic`, `gesture_topic`, `model_path`, `threshold`, `hold`) are listed at the top of the script.
+
+Any visible hand can give a command; the node does not check that it belongs to the owner. Test with only the owner in view.
+
 ## Check the saved model without a camera
 
 ~~~powershell
@@ -84,6 +114,7 @@ To retrain from the earlier sessions, run the following from the project root. T
 | `src/inference/classifier.py` | Exports the trained MLP and scaler, then loads those arrays to predict a gesture and confidence using NumPy. |
 | `src/inference/pipeline.py` | Processes one camera frame at a time. Returns the raw prediction for debugging and the filtered command for the controller. Includes a finger-count fallback for testing without a checkpoint. |
 | `src/inference/hand_crop.py` | Makes a square, padded crop around an annotated hand for HaGRID extraction. |
+| `src/inference/fsm_bridge.py` | Maps each pose to the action word `fsm_node` reads, and sends each new gesture once instead of on every frame. Edit `GESTURE_TO_FSM` to change which pose triggers which action. |
 | `src/__init__.py`, `src/inference/__init__.py` | Mark the source and inference directories as Python packages. |
 
 ### Scripts
@@ -96,13 +127,14 @@ To retrain from the earlier sessions, run the following from the project root. T
 | `scripts/extract_hagrid.py` | Prepare optional HaGRID training data by cropping annotated hands and writing detected landmarks in the webcam recorder’s CSV format. |
 | `scripts/train.py` | Train on one or more session CSVs, augment the samples by mirroring, fit the scaler and MLP, and export the checkpoint. |
 | `scripts/evaluate.py` | Score a checkpoint on a labelled session. Prints frame accuracy and a confusion matrix showing which gestures were mixed up. |
+| `scripts/gesture_node.py` | On the car: ROS 2 node that reads the RealSense image topic and publishes actions on `/hand_gesture` for `fsm_node`. Needs ROS 2, so it does not run on the Windows laptop. |
 
 ### Model, tests and environment
 
 | File | Role |
 |---|---|
 | `checkpoints/gesture_model.npz` | Saved model used by the live demo. Bundles the weights, scaler and gesture labels. |
-| `tests/test_pipeline.py` | Runs camera-free checks for feature geometry, CSV recording and undo, cropping, HaGRID extraction, model export and command filtering. |
+| `tests/test_pipeline.py` | Runs camera-free checks for feature geometry, CSV recording and undo, cropping, HaGRID extraction, model export, command filtering, and the pose-to-action table (it fails if a trained pose has no action). |
 | `requirements-train.txt` | Pins the laptop dependencies for data collection, training and the webcam demo. |
 | `requirements-jetson.txt` | Documents the Jetson runtime environment. Use it as a reference when checking the board’s installed packages. |
 | `.gitignore` | Keeps local files such as recorded session data out of version control. |
@@ -111,4 +143,5 @@ To retrain from the earlier sessions, run the following from the project root. T
 
 - **Evaluate the final checkpoint on unseen recordings.** Session 5 became part of training after the earlier evaluation. Record a fresh session and run `scripts/evaluate.py` on it. Include another person and vary distance and lighting to see where recognition breaks down.
 - **Measure response time on the Jetson.** Run the live pipeline with the car camera and record the package versions, frame rate and time from forming a gesture to receiving a stable command. The five-frame hold takes longer as frame rate drops.
+- **Run `gesture_node.py` on the car.** It has only been checked on the laptop with stand-in ROS modules. Confirm it receives camera frames, logs **trained model**, and that `ros2 topic echo /hand_gesture` shows one message per gesture.
 - **Test the handoff to RoboPet’s controller.** Hold a spin gesture and confirm the controller starts a single spin. Lower the hand, verify that the command clears, then repeat the gesture to check that a second request is accepted.

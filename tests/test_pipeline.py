@@ -24,7 +24,9 @@ import collect_data as cd  # noqa: E402
 from src.inference import classifier as clf_mod  # noqa: E402
 from src.inference import hand_landmarks as hl  # noqa: E402
 from src.inference.hand_crop import square_crop  # noqa: E402
-from src.inference.pipeline import CommandSmoother, FingerCountPlaceholder  # noqa: E402
+from src.inference.fsm_bridge import GESTURE_TO_FSM, FsmCommandFilter  # noqa: E402
+from src.inference.pipeline import (  # noqa: E402
+    DEFAULT_MODEL_PATH, CommandSmoother, FingerCountPlaceholder)
 
 rng = np.random.default_rng(0)
 pts = rng.uniform(100, 400, (21, 2)).astype(np.float32)
@@ -154,6 +156,27 @@ def test_placeholder():
     ph = FingerCountPlaceholder()
     assert ph.predict(hl.normalize(hand(True)))[0] == "palm"
     assert ph.predict(hl.normalize(hand(False)))[0] == "fist"
+
+
+def test_fsm_filter_sends_each_gesture_once():
+    f = FsmCommandFilter()
+    # A held pose repeats every frame; only the first frame is sent.
+    assert [f.update("thumb_side") for _ in range(4)] == ["spin", None, None, None]
+    # Lowering the hand re-arms it, so the same pose can be requested again.
+    assert f.update(None) is None and f.update("thumb_side") == "spin"
+    # Changing straight to another pose sends the new one.
+    assert f.update("palm") == "stop"
+    # Poses outside the table never reach the state machine.
+    assert f.update("no_gesture") is None and f.update("fist") is None
+
+
+def test_fsm_table_matches_model():
+    # Every trained pose except no_gesture needs an action, and every action
+    # must be one of the four words fsm_node accepts.
+    model = clf_mod.GestureModel(os.path.join(ROOT, DEFAULT_MODEL_PATH))
+    poses = set(model.classes) - {"no_gesture"}
+    assert poses == set(GESTURE_TO_FSM), (poses, set(GESTURE_TO_FSM))
+    assert set(GESTURE_TO_FSM.values()) <= {"stop", "come", "spin", "switch_owner"}
 
 
 if __name__ == "__main__":
