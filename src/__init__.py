@@ -1,1 +1,0 @@
-"""RoboPet gesture detection package."""
